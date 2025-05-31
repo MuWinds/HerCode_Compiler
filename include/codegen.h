@@ -1,4 +1,5 @@
 #include "ast.h"
+#include "ir.h"
 #include <stdio.h>
 typedef struct
 {
@@ -10,5 +11,5 @@ typedef struct
 // 最大函数数量
 #define MAX_FUNCTIONS 100
 FunctionDef *find_function(const char *name, FunctionDef **functions, int function_count);
-void generate_c_code(const char *c_header, ASTNode **nodes, int count, FILE *output);
+void generate_x86_asm(IRProgram *program, FILE *output);
 void compile(char *c_filename, char *output_name);

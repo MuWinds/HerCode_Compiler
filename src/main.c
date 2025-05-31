@@ -4,6 +4,7 @@
 #include "parser.h"
 #include "codegen.h"
 #include "ast.h"
+#include "ir.h"
 
 char *read_file(const char *filename)
 {
@@ -91,15 +92,14 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    // 读取整个文件
+    // 读取源文件
     char *source = read_file(argv[1]);
     if (!source)
     {
         fprintf(stderr, "Error reading file: %s\n", argv[1]);
         return 1;
     }
-
-    // 尝试分离C头部分
+    // 尝试分离C头部分（已废弃，但要对齐需求所以还得保留）
     char *c_header = NULL;
     char *hercode_source = NULL;
     separate_header(source, "Hello! Her World", &c_header, &hercode_source);
@@ -112,7 +112,6 @@ int main(int argc, char *argv[])
 
     // 输出分离结果用于调试
     printf("HerCode Source to Parse:\n%s\n", hercode_source);
-
     // 创建词法分析器和解析器
     Lexer *lexer = new_lexer(hercode_source);
     Parser *parser = new_parser(lexer);
@@ -120,38 +119,40 @@ int main(int argc, char *argv[])
     // 解析程序
     int node_count;
     ASTNode **nodes = parse_program(parser, &node_count);
-    printf("Parsed %d nodes\n", node_count);
 
-    // 生成C代码
-    FILE *c_file = fopen("temp.c", "w");
-    if (!c_file)
+    // 生成中间表示
+    IRProgram *ir_program = ast_to_ir(nodes, node_count);
+
+    // 生成目标代码
+    char *output_name = argc >= 3 ? argv[2] : "output";
+
+    // 生成汇编文件
+    FILE *asm_file = fopen("temp.asm", "w");
+    if (!asm_file)
     {
-        perror("Error creating C file");
+        perror("Error creating assembly file");
         return 1;
     }
-    generate_c_code(c_header, nodes, node_count, c_file);
-    fclose(c_file);
+    generate_x86_asm(ir_program, asm_file);
+    fclose(asm_file);
 
-    // 编译
-    char output_name[256] = "a.out";
-    if (argc >= 3)
-    {
-        strncpy(output_name, argv[2], sizeof(output_name) - 1);
-    }
-    compile("temp.c", output_name);
+    // 汇编和链接
+    char cmd[256];
+    sprintf(cmd, "nasm -f elf temp.asm -o temp.o && "
+                 "ld -m elf_i386 -s -o %s temp.o",
+            output_name);
+    system(cmd);
 
-    // 清理
-    if (c_header)
-        free(c_header);
-    free(source);
-    free_parser(parser);
-
+    // 清理资源
+    free_ir_program(ir_program);
     for (int i = 0; i < node_count; i++)
     {
         free_node(nodes[i]);
     }
     free(nodes);
+    free_parser(parser);
+    free(source);
 
-    printf("Successfully generated: %s\n", output_name);
+    printf("Compilation successful. Output: %s\n", output_name);
     return 0;
 }

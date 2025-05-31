@@ -1,119 +1,101 @@
 #include "codegen.h"
+#include "ir.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 static FunctionDef **global_functions = NULL;
 static int global_function_count = 0;
 
-// 字符串转义函数
-char *escape_string(const char *input)
+const char *reg_names[] = {
+    "eax", "ebx", "ecx", "edx", "esi", "edi", "esp", "ebp"};
+
+void generate_x86_asm(IRProgram *program, FILE *output)
 {
-    if (!input)
-        return strdup("");
+    // 输出汇编头
+    fprintf(output, "BITS 32\n");
+    fprintf(output, "section .data\n");
 
-    // 计算需要多少额外空间
-    size_t len = strlen(input);
-    size_t extra = 0;
-    for (const char *c = input; *c; c++)
+    // 处理.data段
+    for (int i = 0; i < program->count; i++)
     {
-        if (*c == '\\' || *c == '"')
-            extra++;
-    }
+        IRInstruction inst = program->instructions[i];
 
-    // 分配内存
-    char *output = malloc(len + extra + 1);
-    if (!output)
-        return NULL;
-
-    char *dst = output;
-    for (const char *src = input; *src; src++)
-    {
-        if (*src == '\\' || *src == '"')
+        switch (inst.type)
         {
-            *dst++ = '\\'; // 添加转义字符
-        }
-        *dst++ = *src;
-    }
-    *dst = '\0';
-    return output;
-}
-
-void generate_c_code(const char *c_header, ASTNode **nodes, int count, FILE *output)
-{
-    // 写入C头文件部分
-    fprintf(output, "#include <stdio.h>\n\n");
-
-    // 首先收集所有函数定义
-    global_functions = malloc(MAX_FUNCTIONS * sizeof(FunctionDef *));
-    for (int i = 0; i < count; i++)
-    {
-        if (nodes[i]->type == STMT_FUNCTION_DEF)
-        {
-            FunctionDef *def = malloc(sizeof(FunctionDef));
-            def->name = strdup(nodes[i]->value);
-            def->body = nodes[i]->body;
-            def->body_count = nodes[i]->body_count;
-
-            global_functions[global_function_count++] = def;
-        }
-    }
-
-    // 生成函数声明（所有函数都返回void）
-    fprintf(output, "\n/* Function declarations */\n");
-    for (int i = 0; i < global_function_count; i++)
-        fprintf(output, "void function_%s();\n", global_functions[i]->name);
-    // 生成main函数
-    fprintf(output, "\nint main() {\n");
-    for (int i = 0; i < count; i++)
-    {
-        // 如果有外部C代码头文件，写入它
-        if (c_header != NULL)
-            fprintf(output, "    %s\n", c_header);
-        if (nodes[i]->type == STMT_SAY)
-            fprintf(output, "    printf(\"%%s\\n\", \"%s\");\n", nodes[i]->value);
-        else if (nodes[i]->type == STMT_FUNCTION_CALL)
-            fprintf(output, "    function_%s();\n", nodes[i]->value);
-    }
-    fprintf(output, "    return 0;\n}\n");
-
-    // 生成函数实现
-    fprintf(output, "\n/* Function implementations */\n");
-    for (int i = 0; i < global_function_count; i++)
-    {
-        FunctionDef *def = global_functions[i];
-        fprintf(output, "void function_%s() {\n", def->name);
-
-        for (int j = 0; j < def->body_count; j++)
-        {
-            ASTNode *stmt = def->body[j];
-
-            if (stmt->type == STMT_SAY)
+        case IR_DATA:
+            if (inst.operands[0].type == OP_STRING)
             {
-                char *escaped = escape_string(stmt->value);
-                fprintf(output, "    printf(\"%%s\\n\", \"%s\");\n", escaped);
-                free(escaped);
+                fprintf(output, "%s\n", inst.operands[0].str);
             }
-            else if (stmt->type == STMT_FUNCTION_CALL)
+            break;
+        default:
+            // 其他指令不属于.data段
+            break;
+        }
+    }
+
+    // 开始.text段
+    fprintf(output, "\nsection .text\n");
+    fprintf(output, "global _start\n");
+    fprintf(output, "_start:\n");
+
+    // 处理.text段指令
+    for (int i = 0; i < program->count; i++)
+    {
+        IRInstruction inst = program->instructions[i];
+
+        switch (inst.type)
+        {
+        case IR_DATA:
+            // 这些在.data段已经处理
+            break;
+
+        case IR_MOV:
+            fprintf(output, "    mov %s, %d\n",
+                    reg_names[inst.operands[0].reg],
+                    inst.operands[1].imm);
+            break;
+
+        case IR_PUSH:
+            if (inst.operands[0].type == OP_IMM)
             {
-                fprintf(output, "    function_%s();\n", stmt->value);
+                fprintf(output, "    push %d\n", inst.operands[0].imm);
             }
+            break;
+
+        case IR_CALL:
+            fprintf(output, "    call %s\n", inst.operands[0].label);
+            break;
+
+        case IR_RET:
+            fprintf(output, "    ret\n");
+            break;
+
+        case IR_JMP:
+            fprintf(output, "    jmp %s\n", inst.operands[0].label);
+            break;
+
+        case IR_LABEL:
+            fprintf(output, "%s:\n", inst.operands[0].label);
+            break;
+
+        case IR_SYSCALL:
+            fprintf(output, "    int 0x80\n");
+            break;
+
+        case IR_POP:
+            fprintf(output, "    add esp, %d\n", inst.operands[0].imm);
+            break;
+
+        default:
+            fprintf(output, "    ; Unsupported IR instruction: %d\n", inst.type);
+            break;
         }
 
-        fprintf(output, "}\n\n");
+        // 添加注释
+        if (inst.comment)
+        {
+            fprintf(output, "    ; %s\n", inst.comment);
+        }
     }
-
-    // 清理
-    for (int i = 0; i < global_function_count; i++)
-    {
-        free(global_functions[i]);
-    }
-    free(global_functions);
-    global_function_count = 0;
-}
-
-void compile(char *c_filename, char *output_name)
-{
-    char cmd[256];
-    sprintf(cmd, "gcc -o %s %s", output_name, c_filename);
-    system(cmd);
 }
