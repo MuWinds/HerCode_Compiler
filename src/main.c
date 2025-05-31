@@ -136,12 +136,36 @@ int main(int argc, char *argv[])
     generate_x86_asm(ir_program, asm_file);
     fclose(asm_file);
 
-    // 汇编和链接
-    char cmd[256];
-    sprintf(cmd, "nasm -f elf temp.asm -o temp.o && "
-                 "ld -m elf_i386 -s -o %s temp.o",
+    // 汇编和链接命令
+    char cmd[1024];
+
+    // 检测操作系统
+#ifdef _WIN32
+    // Windows 平台命令
+    sprintf(cmd, "nasm -f win32 temp.asm -o temp.obj && "
+                 "gcc -static temp.obj -o %s",
             output_name);
-    system(cmd);
+#else
+    // Linux/macOS 平台命令
+    sprintf(cmd, "nasm -f elf32 temp.asm -o temp.o && "
+                 "ld -m elf_i386 temp.o -o %s",
+            output_name);
+#endif
+
+    int result = system(cmd);
+    if (result != 0)
+    {
+        fprintf(stderr, "Assembly and linking failed. Command: %s\n", cmd);
+        return 1;
+    }
+
+    // 清理临时文件
+    remove("temp.asm");
+#ifdef _WIN32
+    remove("temp.obj");
+#else
+    remove("temp.o");
+#endif
 
     // 清理资源
     free_ir_program(ir_program);
