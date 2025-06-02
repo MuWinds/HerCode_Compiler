@@ -141,6 +141,6 @@ void generate_c_code(const char *c_header, ASTNode **nodes, int count, FILE *out
 void compile(char *c_filename, char *output_name)
 {
     char cmd[256];
-    sprintf(cmd, "gcc -o %s %s", output_name, c_filename);
+    sprintf(cmd, "gcc -O2 -o %s %s", output_name, c_filename);
     system(cmd);
 }
