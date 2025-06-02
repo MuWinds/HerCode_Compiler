@@ -22,4 +22,5 @@ ASTNode *create_say_node(char *str);
 void free_node(ASTNode *node);
 ASTNode *create_function_call_node(char *name);
 ASTNode *create_function_def_node(char *name, ASTNode **body, int body_count);
+ASTNode *create_block_node(ASTNode **nodes, int count);
 #endif

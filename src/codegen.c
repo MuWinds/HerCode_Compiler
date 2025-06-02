@@ -4,6 +4,7 @@
 #include <string.h>
 static FunctionDef **global_functions = NULL;
 static int global_function_count = 0;
+static int global_functions_capacity = 0;
 
 // 字符串转义函数
 char *escape_string(const char *input)
@@ -56,11 +57,24 @@ void generate_c_code(const char *c_header, ASTNode **nodes, int count, FILE *out
     fprintf(output, "#include <locale.h>\n\n");
 
     // 首先收集所有函数定义
-    global_functions = malloc(MAX_FUNCTIONS * sizeof(FunctionDef *));
     for (int i = 0; i < count; i++)
     {
         if (nodes[i]->type == STMT_FUNCTION_DEF)
         {
+            // 检查是否需要扩容
+            if (global_function_count >= global_functions_capacity)
+            {
+                int new_capacity = global_functions_capacity == 0 ? 8 : global_functions_capacity * 2;
+                FunctionDef **new_functions = realloc(global_functions, new_capacity * sizeof(FunctionDef *));
+                if (!new_functions)
+                {
+                    fprintf(stderr, "Memory allocation failed\n");
+                    exit(1);
+                }
+                global_functions = new_functions;
+                global_functions_capacity = new_capacity;
+            }
+
             FunctionDef *def = malloc(sizeof(FunctionDef));
             def->name = strdup(nodes[i]->value);
             def->body = nodes[i]->body;

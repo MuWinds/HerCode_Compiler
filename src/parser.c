@@ -3,7 +3,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#define MAX_STATEMENTS 100
 const char *token_type_to_string(TokenType type)
 {
     switch (type)
@@ -171,9 +170,18 @@ ASTNode *parse_function_definition(Parser *parser)
     int first_token = 1;
 
     // 解析函数体
-    ASTNode **body = malloc(MAX_STATEMENTS * sizeof(ASTNode *));
+    ASTNode **body = NULL;
+    int body_capacity = 8; // 初始容量
     int body_count = 0;
     parser->current_indent = -1; // 标记函数体缩进级别未设置
+
+    // 初始化body数组
+    body = malloc(body_capacity * sizeof(ASTNode *));
+    if (!body)
+    {
+        fprintf(stderr, "Memory allocation failed for function body\n");
+        exit(1);
+    }
 
     // 直到遇到end或DEDENT
     while (1)
@@ -183,7 +191,6 @@ ASTNode *parse_function_definition(Parser *parser)
                parser->current_token->type == TOKEN_INDENT ||
                parser->current_token->type == TOKEN_DEDENT)
         {
-
             // 第一次遇到缩进，设置当前缩进级别
             if (parser->current_token->type == TOKEN_INDENT &&
                 parser->current_indent == -1)
@@ -213,11 +220,23 @@ ASTNode *parse_function_definition(Parser *parser)
 
         // 遇到函数体中的语句
         printf("  Parsing function body statement (%s)\n", token_type_to_string(parser->current_token->type));
-        body[body_count] = parse_statement(parser);
-        if (body[body_count] != NULL)
+
+        // 检查并扩展数组容量
+        if (body_count >= body_capacity)
         {
-            body_count++;
+            body_capacity *= 2;
+            ASTNode **new_body = realloc(body, body_capacity * sizeof(ASTNode *));
+            if (!new_body)
+            {
+                fprintf(stderr, "Memory reallocation failed for function body\n");
+                exit(1);
+            }
+            body = new_body;
         }
+
+        // 解析语句并存储
+        ASTNode *stmt = parse_statement(parser);
+        body[body_count++] = stmt;
     }
 
     // 消耗end关键字
@@ -237,7 +256,13 @@ ASTNode *parse_function_definition(Parser *parser)
     parser->current_indent = 0;
     printf("Successfully parsed function '%s' with %d statements\n", func_name, body_count);
 
-    return create_function_def_node(func_name, body, body_count);
+    ASTNode *result = create_function_def_node(func_name, body, body_count);
+    if (!result)
+    {
+        free(body);
+        return NULL;
+    }
+    return result;
 }
 
 ASTNode *parse_function_call(Parser *parser)
@@ -257,7 +282,8 @@ ASTNode *parse_function_call(Parser *parser)
 ASTNode *parse_block(Parser *parser, int *count)
 {
     *count = 0;
-    ASTNode **nodes = malloc(MAX_STATEMENTS * sizeof(ASTNode *));
+    ASTNode **nodes = NULL;
+    int nodes_capacity = 0;
 
     while (1)
     {
@@ -275,16 +301,39 @@ ASTNode *parse_block(Parser *parser, int *count)
             break;
         }
 
+        if (*count >= nodes_capacity)
+        {
+            nodes_capacity = nodes_capacity ? nodes_capacity * 2 : 8;
+            ASTNode **new_nodes = realloc(nodes, nodes_capacity * sizeof(ASTNode *));
+            if (!new_nodes)
+            {
+                fprintf(stderr, "Memory reallocation failed for block nodes\n");
+                exit(1);
+            }
+            nodes = new_nodes;
+        }
         nodes[*count] = parse_statement(parser);
         (*count)++;
     }
-    return *nodes;
+    ASTNode *block = create_block_node(nodes, *count);
+    if (!block)
+    {
+        for (int i = 0; i < *count; i++)
+        {
+            free_node(nodes[i]);
+        }
+        free(nodes);
+        return NULL;
+    }
+    free(nodes);
+    return block;
 }
 
 ASTNode **parse_program(Parser *parser, int *count)
 {
     *count = 0;
-    ASTNode **nodes = malloc(MAX_STATEMENTS * sizeof(ASTNode *));
+    ASTNode **nodes = NULL;
+    int nodes_capacity = 0;
 
     // 允许函数定义出现在程序开头
     while (parser->current_token->type != TOKEN_EOF)
@@ -310,10 +359,16 @@ ASTNode **parse_program(Parser *parser, int *count)
         }
 
         // 解析函数定义
-        if (*count >= MAX_STATEMENTS)
+        if (*count >= nodes_capacity)
         {
-            fprintf(stderr, "Error: Too many statements\n");
-            exit(1);
+            nodes_capacity = nodes_capacity ? nodes_capacity * 2 : 8;
+            ASTNode **new_nodes = realloc(nodes, nodes_capacity * sizeof(ASTNode *));
+            if (!new_nodes)
+            {
+                fprintf(stderr, "Memory reallocation failed for program nodes\n");
+                exit(1);
+            }
+            nodes = new_nodes;
         }
 
         // 解析其他语句（包括函数定义）
@@ -378,10 +433,10 @@ ASTNode **parse_program(Parser *parser, int *count)
         }
 
         // 确保不超过最大语句数
-        if (*count >= MAX_STATEMENTS)
+        if (*count >= nodes_capacity)
         {
-            fprintf(stderr, "Too many statements\n");
-            exit(1);
+            nodes_capacity = nodes_capacity ? nodes_capacity * 2 : 8;
+            nodes = realloc(nodes, nodes_capacity * sizeof(ASTNode *));
         }
 
         // 解析语句

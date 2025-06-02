@@ -44,3 +44,27 @@ void free_node(ASTNode *node)
         free(node);
     }
 }
+
+ASTNode *create_block_node(ASTNode **nodes, int count)
+{
+    ASTNode *node = malloc(sizeof(ASTNode));
+    if (!node)
+        return NULL;
+
+    node->type = STMT_SAY; // 暂时使用SAY类型
+    node->value = NULL;
+    node->body = malloc(sizeof(ASTNode *) * count);
+    if (!node->body)
+    {
+        free(node);
+        return NULL;
+    }
+
+    node->body_count = count;
+    for (int i = 0; i < count; i++)
+    {
+        node->body[i] = nodes[i];
+    }
+
+    return node;
+}
