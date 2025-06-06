@@ -10,7 +10,7 @@ char *read_file(const char *filename)
     FILE *file = fopen(filename, "rb");
     if (!file)
     {
-        perror("File opening failed");
+        fprintf(stderr, "文件打开失败");
         return NULL;
     }
 
@@ -87,29 +87,39 @@ int main(int argc, char *argv[])
 {
     if (argc < 2)
     {
-        fprintf(stderr, "Usage: %s <source_file> [output_name]\n", argv[0]);
+        fprintf(stderr, "Usage: %s <source_file> [--out=output_name] [-r]\n", argv[0]);
         return 1;
+    }
+
+    // 解析参数
+    char output_name[256] = "hercode.exe";
+    int remove_temp = 0;
+    for (int i = 2; i < argc; i++) {
+        if (strncmp(argv[i], "--out=", 6) == 0) {
+            strncpy(output_name, argv[i] + 6, sizeof(output_name) - 1);
+            output_name[sizeof(output_name) - 1] = '\0';
+            // 自动补全.exe后缀
+            size_t len = strlen(output_name);
+            if (len < 4 || strcmp(output_name + len - 4, ".exe") != 0) {
+                if (len < sizeof(output_name) - 4) {
+                    strcat(output_name, ".exe");
+                }
+            }
+        } else if (strcmp(argv[i], "-r") == 0) {
+            remove_temp = 1;
+        }
     }
 
     // 读取整个文件
-    char *source = read_file(argv[1]);
-    if (!source)
+    char *hercode_source = read_file(argv[1]);
+    if (!hercode_source)
     {
-        fprintf(stderr, "Error reading file: %s\n", argv[1]);
+        fprintf(stderr, "读取文件失败: %s\n", argv[1]);
         return 1;
     }
 
-    // 尝试分离C头部分
-    char *c_header = NULL;
-    char *hercode_source = NULL;
-    separate_header(source, "Hello! Her World", &c_header, &hercode_source);
-    printf("C Code:\n%s\n", c_header);
-    // 验证分离结果
-    if (hercode_source == NULL)
-        hercode_source = source; // 如果分离失败，使用整个文件
-
     // 输出分离结果用于调试
-    printf("HerCode Source to Parse:\n%s\n", hercode_source);
+    printf("HerCode 源代码:\n%s\n", hercode_source);
 
     // 创建词法分析器和解析器
     Lexer *lexer = new_lexer(hercode_source);
@@ -117,31 +127,74 @@ int main(int argc, char *argv[])
 
     // 解析程序
     int node_count;
+    printf("[MAIN] 调用 parse_program...\n");
     ASTNode **nodes = parse_program(parser, &node_count);
-    printf("Parsed %d nodes\n", node_count);
+    printf("[DEBUG] parse_program 返回 node_count=%d, nodes ptr=%p\n", node_count, (void*)nodes);
+    if (!nodes) {
+        fprintf(stderr, "解析失败！\n");
+        return 1;
+        // 不再提前return，继续执行后续流程
+    }
+    printf("总共解析 %d 个节点\n", node_count);
 
     // 生成C代码
-    FILE *c_file = fopen("temp.c", "w");
+    printf("[MAIN] 准备生成 C 代码...\n");
+    for (int i = 0; i < node_count; i++) {
+        printf("[MAIN][DEBUG] 节点[%d] 类型 = %d\n", i, nodes[i] ? nodes[i]->type : -1);
+    }
+        // 生成C文件名，与最终exe同名但扩展名为.c
+    char c_filename[512];
+    strncpy(c_filename, output_name, sizeof(c_filename) - 1);
+    c_filename[sizeof(c_filename) - 1] = '\0';
+    char *dot = strrchr(c_filename, '.');
+    if (dot) {
+        strcpy(dot, ".c");
+    } else {
+        strcat(c_filename, ".c");
+    }
+
+    FILE *c_file = fopen(c_filename, "wb");
     if (!c_file)
     {
-        perror("Error creating C file");
+        fprintf(stderr, "创建 C 文件失败");
         return 1;
     }
-    generate_c_code(c_header, nodes, node_count, c_file);
+    // 手动写入 UTF-8 BOM
+    unsigned char bom[] = {0xEF, 0xBB, 0xBF};
+    fwrite(bom, 1, 3, c_file);
+    printf("[MAIN] 调用 generate_c_code...\n");
+    generate_c_code(nodes, node_count, c_file);
+    fflush(c_file);
+    printf("[MAIN] C 代码生成完成。\n");
     fclose(c_file);
+    // 检查文件是否存在
+    FILE *check_file = fopen(c_filename, "r");
+    if (check_file) {
+        printf("[MAIN] %s 成功生成！\n", c_filename);
+        fclose(check_file);
+    } else {
+        printf("[MAIN] %s 生成失败！\n", c_filename);
+    }
 
     // 编译
-    char output_name[256] = "a.out";
-    if (argc >= 3)
-    {
-        strncpy(output_name, argv[2], sizeof(output_name) - 1);
-    }
-    compile("temp.c", output_name);
+    compile(c_filename, output_name);
 
-    // 清理
-    if (c_header)
-        free(c_header);
-    free(source);
+    // 按需清理临时文件
+    if (remove_temp) {
+        remove(c_filename);
+#ifdef _MSC_VER
+        char objfile[512];
+        strncpy(objfile, c_filename, sizeof(objfile) - 1);
+        objfile[sizeof(objfile) - 1] = '\0';
+        char *dot2 = strrchr(objfile, '.');
+        if (dot2) strcpy(dot2, ".obj");
+        remove(objfile);
+        printf("已删除 %s 和 %s\n", c_filename, objfile);
+#else
+        printf("已删除 %s\n", c_filename);
+#endif
+    }
+
     free_parser(parser);
 
     for (int i = 0; i < node_count; i++)
@@ -150,6 +203,6 @@ int main(int argc, char *argv[])
     }
     free(nodes);
 
-    printf("Successfully generated: %s\n", output_name);
+    printf("成功生成: %s\n", output_name);
     return 0;
 }

@@ -1,0 +1,8 @@
+
+function say_hello:
+	say "Hello! Her World" #注释
+	say "编程很美，也属于你" #注释2
+end
+start:
+	say_hello
+end

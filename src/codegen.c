@@ -2,6 +2,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <windows.h>
+void hercode_print(const char* msg) {
+    DWORD written;
+    WriteConsoleA(GetStdHandle(STD_OUTPUT_HANDLE), msg, (DWORD)strlen(msg), &written, NULL);
+}
+void hercode_exit(int code) {
+    ExitProcess(code);
+}
+#else
+#include <unistd.h>
+void hercode_print(const char* msg) {
+    write(1, msg, strlen(msg));
+}
+void hercode_exit(int code) {
+    exit(code);
+}
+#endif
 static FunctionDef **global_functions = NULL;
 static int global_function_count = 0;
 static int global_functions_capacity = 0;
@@ -10,7 +28,7 @@ static int global_functions_capacity = 0;
 char *escape_string(const char *input)
 {
     if (!input)
-        return strdup("");
+        return _strdup("");
 
     // 计算需要多少额外空间
     size_t len = strlen(input);
@@ -39,8 +57,10 @@ char *escape_string(const char *input)
     return output;
 }
 
-void generate_c_code(const char *c_header, ASTNode **nodes, int count, FILE *output)
+void generate_c_code(ASTNode **nodes, int count, FILE *output)
 {
+    printf("[CODEGEN] generate_c_code 被调用, node_count=%d\n", count);
+
     // 写入C头文件部分
     fprintf(output, "#include <stdio.h>\n");
     fprintf(output, "#include <stdlib.h>\n");
@@ -68,7 +88,7 @@ void generate_c_code(const char *c_header, ASTNode **nodes, int count, FILE *out
                 FunctionDef **new_functions = realloc(global_functions, new_capacity * sizeof(FunctionDef *));
                 if (!new_functions)
                 {
-                    fprintf(stderr, "Memory allocation failed\n");
+                    fprintf(stderr, "内存分配失败\n");
                     exit(1);
                 }
                 global_functions = new_functions;
@@ -76,7 +96,7 @@ void generate_c_code(const char *c_header, ASTNode **nodes, int count, FILE *out
             }
 
             FunctionDef *def = malloc(sizeof(FunctionDef));
-            def->name = strdup(nodes[i]->value);
+            def->name = _strdup(nodes[i]->value);
             def->body = nodes[i]->body;
             def->body_count = nodes[i]->body_count;
 
@@ -85,40 +105,34 @@ void generate_c_code(const char *c_header, ASTNode **nodes, int count, FILE *out
     }
 
     // 生成函数声明（所有函数都返回void）
-    fprintf(output, "\n/* Function declarations */\n");
+    fprintf(output, "\n/* 函数声明 */\n");
     for (int i = 0; i < global_function_count; i++)
         fprintf(output, "void function_%s();\n", global_functions[i]->name);
     // 生成main函数
     fprintf(output, "\nint main() {\n");
-    // 如果有外部C代码头文件，写入它
-    if (c_header != NULL)
-    {
-        // 逐行处理 c_header
-        const char *start = c_header;
-        const char *end;
-        while ((end = strchr(start, '\n')) != NULL)
-        { // 找到换行符
-            // 输出：制表符 + 当前行（不含换行符）
-            fprintf(output, "\t%.*s\n", (int)(end - start), start);
-            start = end + 1; // 移到下一行
-        }
-        // 输出剩余部分（最后一行）
-        if (*start != '\0')
-        {
-            fprintf(output, "\t%s\n", start);
-        }
-    }
     for (int i = 0; i < count; i++)
     {
-        if (nodes[i]->type == STMT_SAY)
-            fprintf(output, "    printf(\"%%s\\n\", \"%s\");\n", nodes[i]->value);
+        if (nodes[i]->type == STMT_SAY) {
+            char *escaped = escape_string(nodes[i]->value);
+            fprintf(output, "    printf(\"%s\\n\");\n", escaped);
+            free(escaped);
+        }
         else if (nodes[i]->type == STMT_FUNCTION_CALL)
+        {
             fprintf(output, "    function_%s();\n", nodes[i]->value);
+        }
+        else if (nodes[i]->type == STMT_C_BLOCK || nodes[i]->type == AST_C_BLOCK)
+        {
+            if (nodes[i]->c_code)
+            {
+                fprintf(output, "%s\n", nodes[i]->c_code);
+            }
+        }
     }
     fprintf(output, "    return 0;\n}\n");
 
     // 生成函数实现
-    fprintf(output, "\n/* Function implementations */\n");
+    fprintf(output, "\n/* 函数实现 */\n");
     for (int i = 0; i < global_function_count; i++)
     {
         FunctionDef *def = global_functions[i];
@@ -127,22 +141,33 @@ void generate_c_code(const char *c_header, ASTNode **nodes, int count, FILE *out
         for (int j = 0; j < def->body_count; j++)
         {
             ASTNode *stmt = def->body[j];
-
+            printf("[CODEGEN] 函数 '%s' stmt %d: type=%d\n", def->name, j, stmt->type);
             if (stmt->type == STMT_SAY)
             {
                 char *escaped = escape_string(stmt->value);
-                fprintf(output, "    printf(\"%%s\\n\", \"%s\");\n", escaped);
+                fprintf(output, "    printf(\"%s\\n\");\n", escaped);
                 free(escaped);
             }
             else if (stmt->type == STMT_FUNCTION_CALL)
             {
                 fprintf(output, "    function_%s();\n", stmt->value);
             }
+            else if (stmt->type == STMT_C_BLOCK || stmt->type == AST_C_BLOCK)
+            {
+                if (stmt->c_code)
+                {
+                    fprintf(output, "%s\n", stmt->c_code);
+                }
+            }
         }
 
         fprintf(output, "}\n\n");
     }
 
+    // 如果没有任何节点，生成一个空的main函数，避免C文件为空
+    if (count == 0) {
+        fprintf(output, "int main() { return 0; }\n");
+    }
     // 清理
     for (int i = 0; i < global_function_count; i++)
     {
@@ -152,9 +177,17 @@ void generate_c_code(const char *c_header, ASTNode **nodes, int count, FILE *out
     global_function_count = 0;
 }
 
+#ifdef _MSC_VER
+#include <process.h>
+#endif
+
 void compile(char *c_filename, char *output_name)
 {
-    char cmd[256];
+    char cmd[512];
+#ifdef _MSC_VER
+    sprintf(cmd, "cl /utf-8 /nologo /Fe:%s %s", output_name, c_filename);
+#else
     sprintf(cmd, "gcc -O2 -o %s %s", output_name, c_filename);
+#endif
     system(cmd);
 }

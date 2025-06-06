@@ -9,5 +9,5 @@ typedef struct
 
 // 最大函数数量
 FunctionDef *find_function(const char *name, FunctionDef **functions, int function_count);
-void generate_c_code(const char *c_header, ASTNode **nodes, int count, FILE *output);
+void generate_c_code(ASTNode **nodes, int count, FILE *output);
 void compile(char *c_filename, char *output_name);

@@ -1,10 +1,10 @@
 #ifndef LEXER_H
 #define LEXER_H
 
-typedef enum
-{
+typedef enum {
     TOKEN_EOF,
-    TOKEN_UNKNOWN,
+    TOKEN_UNKNOWN = 1,
+    TOKEN_C_BLOCK, // 支持 __c__ { ... } 内联C代码块
     TOKEN_SAY,
     TOKEN_STRING,
     TOKEN_SEMI, // 不再使用
@@ -15,7 +15,9 @@ typedef enum
     TOKEN_DEDENT,
     TOKEN_COLON,
     TOKEN_FUNCTION,  // function 关键字
-    TOKEN_IDENTIFIER // 函数名
+    TOKEN_LBRACE,    // {
+    TOKEN_RBRACE,    // }
+    TOKEN_IDENTIFIER // 普通标识符
 } TokenType;
 
 typedef struct Token
