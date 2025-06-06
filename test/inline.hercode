@@ -1,0 +1,47 @@
+# inline.hercode
+
+function inline:
+    say "HerCode调用C代码："
+    __c__ {
+        time_t rawtime;
+        struct tm *info;
+        #define BST (+1)
+        #define CCT (+8)
+        time(&rawtime);
+        /* 获取 GMT 时间 */
+        info = gmtime(&rawtime );
+
+        printf("\t当前的世界时钟：\n");
+        printf("\t中国时间 %2d:%02d\n", (info->tm_hour+CCT)%24, info->tm_min);
+        printf("\t伦敦时间 %2d:%02d\n", (info->tm_hour+BST)%24, info->tm_min);
+    }
+    say "inline函数结束"
+
+function add:
+    say "HerCode准备执行C加法"
+    __c__ {
+        int x = 7, y = 8;
+        printf("\tx + y = %d\n", x + y);
+    }
+    say "add函数结束"
+
+function main:
+    say "HerCode进入main"
+
+    __c__ {
+        // 可以直接写C代码
+        printf("\n");
+        printf("Hello! Her World\n");
+        printf("编程很美，也属于你\n");
+    }
+
+    say " "
+    inline
+    add
+    say " "
+    
+    say "main函数结束"
+
+start:
+    main
+end
